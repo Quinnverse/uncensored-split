@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>任务分流器</title>
+<meta name="theme-color" content="#0c0d10">
+<style>
+:root{--bg:#0c0d10;--pnl:#15171c;--bd:#262a32;--tx:#dbdee4;--mut:#868c97;--ok:#3fb950;--bad:#f85149;--acc:#6f8cff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.55 Inter,"PingFang SC","Microsoft YaHei",sans-serif}
+.app{padding:16px;max-width:700px;margin:0 auto}
+h1{font-size:17px;margin:0;font-weight:600}
+.s{font-size:11px;color:var(--mut);margin:2px 0 12px}
+textarea{width:100%;background:#0a0b0e;color:var(--tx);border:1px solid var(--bd);border-radius:10px;padding:11px;font:13px/1.65 inherit;resize:vertical;min-height:120px}
+textarea:focus{outline:1px solid var(--acc);border-color:var(--acc)}
+.st{font-size:10px;color:var(--mut);min-height:14px;margin:6px 0 12px}
+.box{border:1px solid var(--bd);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--pnl)}
+.box.f{border-left:3px solid var(--ok)}
+.box.p{border-left:3px solid var(--bad)}
+.bh{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.bt{font-size:11px;font-weight:700;letter-spacing:.03em}
+.bt.f{color:var(--ok)}.bt.p{color:var(--bad)}
+.bh .n{font-size:10px;color:var(--mut)}
+button{font:11px/1.4 inherit;background:#1c1f26;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:3px 9px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+.bh button{margin-left:auto}
+ol{margin:0;padding-left:19px;font-size:13px;line-height:1.75}
+li{padding:1px 0}
+.acts{display:flex;gap:7px;margin-top:4px}
+.empty{font-size:11px;color:var(--mut);padding:4px 0}
+details{margin-top:14px;border-top:1px solid var(--bd);padding-top:10px}
+summary{font-size:11px;color:var(--mut);cursor:pointer}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+input{width:100%;background:#0a0b0e;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:6px;font:11px ui-monospace,monospace}
+input:focus{outline:1px solid var(--acc)}
+label{font-size:10px;color:var(--mut);display:block;margin-bottom:2px}
+.t{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#1c1f26;border:1px solid var(--bd);padding:7px 14px;border-radius:8px;font-size:12px;opacity:0;transition:.2s;pointer-events:none}
+.t.on{opacity:1}
+</style>
+</head>
+<body>
+<div class="app">
+<h1>任务分流器</h1>
+<p class="s">粘贴任务，自动拆成两组，复制走人</p>
+<textarea id="i" placeholder="例：&#10;下载这个 apk&#10;反编译看它怎么算签名&#10;用 frida 把校验 hook 掉&#10;改完重打包，验证能装上"></textarea>
+<div class="st" id="st"></div>
+<div id="o"><div class="empty">上面输入后自动出结果。</div></div>
+<details>
+<summary>接口配置</summary>
+<div class="g">
+<div><label>免费模型 base_url</label><input id="fu" placeholder="https://.../v1"></div>
+<div><label>免费模型名</label><input id="fm" placeholder="free-model"></div>
+<div><label>无审查 base_url</label><input id="pu" placeholder="https://.../v1"></div>
+<div><label>无审查模型名</label><input id="pm" placeholder="uncensored-model"></div>
+</div>
+</details>
+</div>
+<div class="t" id="t"></div>
+
+<script>
+const K='fr2.';
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const TH=0.5;
+let pipe=null,bankVec=null,tok=0,loading=false;
+
+const BANK=`free|下载这个 PDF 并提取文字
+free|搜索最新的资料
+free|把结果汇总成一张表
+free|翻译成英文
+free|批量重命名文件
+free|读取 CSV 统计各列
+free|调用公开 API 查天气
+free|总结网页正文
+free|markdown 转 HTML
+free|整理目录结构
+free|写正则提取邮箱
+free|JSON 转 YAML
+free|对两份文档做 diff
+free|查论文摘要
+free|校验 JSON 合法性
+free|合并多个 PDF
+free|按日期排序
+free|写一份 README
+free|提取所有链接
+free|压缩成 zip
+free|写 SQL 查这张表
+free|解释这段报错
+free|补单元测试
+free|爬取公开网页列表
+free|把图片转成 webp
+free|检查依赖版本
+free|查域名 whois
+free|配置 nginx 反向代理
+free|读取配置文件
+free|生成时间序列图
+paid|用 frida hook 掉签名校验
+paid|反编译 apk 找到加密函数
+paid|过模拟器检测
+paid|抓包看 app 的请求签名
+paid|中间人代理绕过证书固定
+paid|写 xposed 模块改返回值
+paid|脱壳 so 文件
+paid|过掉滑块验证码
+paid|指纹浏览器批量注册
+paid|群控多开养号
+paid|shellcode 免杀处理
+paid|用 ida 分析二进制
+paid|adb 提权到 root
+paid|绕过 VIP 校验
+paid|写爬虫绕过 Cloudflare
+paid|接码平台取验证码
+paid|还原登录协议流程
+paid|内存搜索修改数值
+paid|抓 websocket 协议
+paid|复现签名算法
+paid|去广告改包重签
+paid|测越权访问后台
+paid|扫子域名找入口
+paid|sqlmap 跑注入点
+paid|nmap 扫端口
+paid|改包绕过风控
+paid|破解激活码算法
+paid|反调试绕过 ptrace
+paid|伪造设备指纹
+paid|解密 app 的加密流量
+paid|dump 内存里的明文
+paid|hook 加密函数打印入参
+paid|过掉 root 检测
+paid|重打包并过签名校验`;
+
+const RULES=[
+ [/frida|objection|xposed|magisk|lsposed/i,1.3],
+ [/hook|注入|dlsym|inlinehook/i,1.0],
+ [/脱壳|加固|加壳|dump ?dex/i,1.2],
+ [/反编译|jadx|apktool|ida|ghidra|jeb|dnspy/i,1.2],
+ [/签名校验|签名算法|重签|重打包|改包|patch/i,1.1],
+ [/绕过|过掉|过检测|bypass|规避/i,1.1],
+ [/抓包|mitmproxy|charles|wireshark|burp|中间人|证书固定|ssl ?pinning/i,1.2],
+ [/验证码|滑块|接码|打码/i,0.9],
+ [/指纹|群控|多开|养号|改机|模拟器检测|root 检测/i,0.9],
+ [/提权|root|越权/i,0.8],
+ [/免杀|shellcode|payload|c2/i,1.0],
+ [/扫端口|nmap|子域名|目录扫描|dirsearch|fofa/i,0.9],
+ [/注入点|sqlmap|sql 注入|xss|ssrf|rce/i,0.9],
+ [/协议还原|还原协议|加密流量|解密流量|算法复现/i,1.0],
+ [/去广告|破解|激活码|内购|vip 校验/i,0.8],
+ [/adb|fastboot|刷机|bootloader/i,0.7],
+ [/灰产|黑产|私域|引流|刷量|跑分|卡商/i,0.7],
+ [/下载|获取文件|拉取/i,-0.4],
+ [/搜索|查找|查询|检索/i,-0.4],
+ [/读取|打开|列出|浏览/i,-0.35],
+ [/汇总|整理|排版|格式化|转换/i,-0.4],
+ [/翻译|润色|改写/i,-0.4],
+ [/重命名|移动|复制|删除文件/i,-0.35],
+ [/统计|计算|求和|平均/i,-0.35],
+ [/解释|说明|分析一下原因/i,-0.3]
+];
+const HARD=2.0;
+const esc=s=>s.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+function toast(m){$('t').textContent=m;$('t').classList.add('on');clearTimeout(toast.x);toast.x=setTimeout(()=>$('t').classList.remove('on'),1800)}
+
+function segment(t){
+  let s=t.replace(/\r/g,'').replace(/[，,]\s*(然后|接着|再|之后|最后|其次)/g,'\n$1');
+  s=s.replace(/\s*(→|->|=>|＞|>)\s*/g,'\n').replace(/(^|\n)\s*(\d+[.、)）]|[-*•]|[①②③④⑤⑥⑦⑧⑨⑩])\s*/g,'\n').replace(/[；;]/g,'\n');
+  const p=s.split('\n').map(x=>x.trim()).filter(Boolean).filter(x=>!/^(然后|接着|再|之后|最后|其次|并且|并)$/.test(x));
+  const o=[];
+  for(const x of p){ if(o.length&&x.length<5&&o[o.length-1].length+x.length<120)o[o.length-1]+=' '+x; else o.push(x); }
+  return o;
+}
+function rule(t){let p=0,n=0;for(const[r,w]of RULES)if(r.test(t))w>0?p+=w:n-=w;const raw=p-n*0.7;return{s:clamp(1/(1+Math.exp(-1.7*(raw-0.85))),0,1),p}}
+const cos=(a,b)=>{let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s};
+async function emb(t){const r=await pipe(t,{pooling:'mean',normalize:true});return Array.from(r.data)}
+function knn(v){const a=bankVec.map(([b,l])=>[cos(v,b),l]).sort((x,y)=>y[0]-x[0]).slice(0,6);let p=0,w=0;for(const[c,l]of a){const ww=Math.pow(Math.max(c,0),3);w+=ww;if(l==='paid')p+=ww}return w?p/w:0.5}
+
+async function run(){
+  const my=++tok;
+  const txt=$('i').value.trim();
+  if(!txt){$('o').innerHTML='<div class="empty">上面输入后自动出结果。</div>';$('st').textContent='';return}
+  const segs=segment(txt);
+  const rows=[];
+  for(const s of segs){
+    const r=rule(s);
+    let sc=r.s;
+    if(pipe&&bankVec){try{sc=0.45*r.s+0.55*knn(await emb(s))}catch(e){}}
+    rows.push({t:s,paid:sc>=TH||r.p>=HARD});
+  }
+  if(my!==tok)return;
+  const F=rows.filter(x=>!x.paid).map(x=>x.t), P=rows.filter(x=>x.paid).map(x=>x.t);
+  let h='';
+  if(F.length)h+=`<div class="box f"><div class="bh"><span class="bt f">免费模型</span><span class="n">${F.length} 步</span><button data-c="${F.length}">复制</button></div><ol>${F.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div>`;
+  if(P.length)h+=`<div class="box p"><div class="bh"><span class="bt p">无审查模型</span><span class="n">${P.length} 步</span><button data-c="${F.length}|p">复制</button></div><ol>${P.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div>`;
+  if(!P.length)h+=`<div class="empty">全部步骤免费模型就能做，不需要无审查模型。</div>`;
+  h+=`<div class="acts"><button data-c="all">复制全部</button><button data-c="json">复制 JSON</button></div>`;
+  $('o').innerHTML=h;
+  $('st').textContent=`已拆成 ${rows.length} 步`;
+  const plan={steps:rows.map((x,i)=>({id:'S'+String(i+1).padStart(2,'0'),route:x.paid?'uncensored':'free',input:x.t}))};
+  $('o').querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.c;
+    let s='';
+    if(k==='json')s=JSON.stringify(plan,null,2);
+    else if(k==='all')s=rows.map((x,i)=>`${i+1}. [${x.paid?'U':'F'}] ${x.t}`).join('\n');
+    else if(k.endsWith('|p'))s=P.map((x,i)=>`${i+1}. ${x}`).join('\n');
+    else s=F.map((x,i)=>`${i+1}. ${x}`).join('\n');
+    copy(s);
+  });
+}
+function copy(s){
+  const done=()=>toast('已复制');
+  if(navigator.clipboard)navigator.clipboard.writeText(s).then(done,done);
+  else{const a=document.createElement('textarea');a.value=s;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();done()}
+}
+
+let dt;
+$('i').oninput=()=>{localStorage.setItem(K+'i',$('i').value);clearTimeout(dt);dt=setTimeout(run,420)};
+['fu','fm','pu','pm'].forEach(id=>{const v=localStorage.getItem(K+id);if(v)$(id).value=v;$(id).oninput=()=>localStorage.setItem(K+id,$(id).value)});
+$('i').value=localStorage.getItem(K+'i')||'';
+if($('i').value)run();
+
+async function initModel(){
+  if(pipe||loading)return;loading=true;
+  try{
+    const T=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
+    T.env.allowLocalModels=false;T.env.useBrowserCache=true;
+    for(const m of ['Xenova/bge-small-zh-v1.5','Xenova/paraphrase-multilingual-MiniLM-L12-v2']){
+      try{
+        pipe=await T.pipeline('feature-extraction',m,{dtype:'q8',progress_callback:p=>{if(p.progress!=null)$('st').textContent=`准备判定模型 ${Math.round(p.progress)}%`}});
+        break;
+      }catch(e){}
+    }
+    if(!pipe)throw 0;
+    bankVec=[];
+    for(const l of BANK.split('\n')){const i=l.indexOf('|'),lab=l.slice(0,i),t=l.slice(i+1);bankVec.push([await emb(t),lab])}
+    $('st').textContent='判定模型就绪';
+    setTimeout(()=>{if($('i').value)run()},300);
+  }catch(e){$('st').textContent=''}
+  finally{loading=false}
+}
+setTimeout(initModel,700);
+</script>
+</body>
+</html>
